@@ -1,6 +1,42 @@
 import AppKit
 import SwiftUI
 
+/// Status bar view: left-click toggles popover, right-click shows context menu (e.g. Quit).
+private final class StatusBarView: NSView {
+    var onLeftClick: (() -> Void)?
+    var onRightClick: ((NSEvent) -> Void)?
+
+    private let imageView: NSImageView = {
+        let iv = NSImageView()
+        iv.image = NSImage(systemSymbolName: "sun.max.fill", accessibilityDescription: "Sunlight Tracker")
+        iv.image?.isTemplate = true
+        iv.contentTintColor = .labelColor
+        return iv
+    }()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addSubview(imageView)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        imageView.frame = bounds
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.buttonNumber == 0 {
+            onLeftClick?()
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onRightClick?(event)
+    }
+}
+
 /// Manages the menu bar status item and popover with sunlight stats.
 final class MenuBarController: NSObject, NSWindowDelegate {
     private var statusItem: NSStatusItem?
@@ -10,12 +46,12 @@ final class MenuBarController: NSObject, NSWindowDelegate {
 
     func setup() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        guard let button = statusItem?.button else { return }
+        guard let statusItem = statusItem else { return }
 
-        button.image = NSImage(systemSymbolName: "sun.max.fill", accessibilityDescription: "Sunlight Tracker")
-        button.image?.isTemplate = true
-        button.action = #selector(togglePopover)
-        button.target = self
+        let view = StatusBarView(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
+        view.onLeftClick = { [weak self] in self?.togglePopover() }
+        view.onRightClick = { [weak self] event in self?.showContextMenu(relativeTo: event) }
+        statusItem.view = view
     }
 
     @objc private func togglePopover() {
@@ -26,8 +62,20 @@ final class MenuBarController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func showContextMenu(relativeTo event: NSEvent) {
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Quit Sunlight Tracker", action: #selector(quit), keyEquivalent: "q"))
+        menu.items.forEach { $0.target = self }
+        guard let view = statusItem?.view else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: view)
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+
     private func showPopover() {
-        guard let button = statusItem?.button else { return }
+        guard let view = statusItem?.view else { return }
 
         sunlightService.refresh()
 
@@ -53,7 +101,7 @@ final class MenuBarController: NSObject, NSWindowDelegate {
             popover?.contentViewController?.view = hosting
         }
 
-        popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover?.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
         if let window = popover?.contentViewController?.view.window {
             window.isOpaque = false
             window.backgroundColor = .clear
